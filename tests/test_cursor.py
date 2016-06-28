@@ -26,9 +26,10 @@ import time
 import pickle
 import psycopg2
 import psycopg2.extensions
-from testutils import (unittest, ConnectingTestCase, skip_before_postgres,
-    skip_if_no_namedtuple, skip_if_no_getrefcount, slow)
-
+import psycopg2.extras
+from psycopg2.extensions import b
+from testutils import unittest, ConnectingTestCase, skip_before_postgres
+from testutils import skip_if_no_namedtuple, skip_if_no_getrefcount
 
 class CursorTests(ConnectingTestCase):
 
@@ -48,10 +49,8 @@ class CursorTests(ConnectingTestCase):
         conn = self.conn
         cur = conn.cursor()
         cur.execute("create temp table test_exc (data int);")
-
         def buggygen():
-            yield 1 // 0
-
+            yield 1//0
         self.assertRaises(ZeroDivisionError,
             cur.executemany, "insert into test_exc values (%s)", buggygen())
         cur.close()
@@ -65,34 +64,28 @@ class CursorTests(ConnectingTestCase):
         # unicode query containing only ascii data
         cur.execute(u"SELECT 'foo';")
         self.assertEqual('foo', cur.fetchone()[0])
-        self.assertEqual(b"SELECT 'foo';", cur.mogrify(u"SELECT 'foo';"))
+        self.assertEqual(b("SELECT 'foo';"), cur.mogrify(u"SELECT 'foo';"))
 
         conn.set_client_encoding('UTF8')
         snowman = u"\u2603"
 
-        def b(s):
-            if isinstance(s, unicode):
-                return s.encode('utf8')
-            else:
-                return s
-
         # unicode query with non-ascii data
         cur.execute(u"SELECT '%s';" % snowman)
         self.assertEqual(snowman.encode('utf8'), b(cur.fetchone()[0]))
-        self.assertQuotedEqual(("SELECT '%s';" % snowman).encode('utf8'),
-            cur.mogrify(u"SELECT '%s';" % snowman))
+        self.assertEqual(("SELECT '%s';" % snowman).encode('utf8'),
+            cur.mogrify(u"SELECT '%s';" % snowman).replace(b("E'"), b("'")))
 
         # unicode args
         cur.execute("SELECT %s;", (snowman,))
         self.assertEqual(snowman.encode("utf-8"), b(cur.fetchone()[0]))
-        self.assertQuotedEqual(("SELECT '%s';" % snowman).encode('utf8'),
-            cur.mogrify("SELECT %s;", (snowman,)))
+        self.assertEqual(("SELECT '%s';" % snowman).encode('utf8'),
+            cur.mogrify("SELECT %s;", (snowman,)).replace(b("E'"), b("'")))
 
         # unicode query and args
         cur.execute(u"SELECT %s;", (snowman,))
         self.assertEqual(snowman.encode("utf-8"), b(cur.fetchone()[0]))
-        self.assertQuotedEqual(("SELECT '%s';" % snowman).encode('utf8'),
-            cur.mogrify(u"SELECT %s;", (snowman,)))
+        self.assertEqual(("SELECT '%s';" % snowman).encode('utf8'),
+            cur.mogrify(u"SELECT %s;", (snowman,)).replace(b("E'"), b("'")))
 
     def test_mogrify_decimal_explodes(self):
         # issue #7: explodes on windows with python 2.5 and psycopg 2.2.2
@@ -103,7 +96,7 @@ class CursorTests(ConnectingTestCase):
 
         conn = self.conn
         cur = conn.cursor()
-        self.assertEqual(b'SELECT 10.3;',
+        self.assertEqual(b('SELECT 10.3;'),
             cur.mogrify("SELECT %s;", (Decimal("10.3"),)))
 
     @skip_if_no_getrefcount
@@ -111,7 +104,8 @@ class CursorTests(ConnectingTestCase):
         # issue #81: reference leak when a parameter value is referenced
         # more than once from a dict.
         cur = self.conn.cursor()
-        foo = (lambda x: x)('foo') * 10
+        i = lambda x: x
+        foo = i('foo') * 10
         import sys
         nref1 = sys.getrefcount(foo)
         cur.mogrify("select %(foo)s, %(foo)s, %(foo)s", {'foo': foo})
@@ -143,7 +137,7 @@ class CursorTests(ConnectingTestCase):
             self.assertEqual(Decimal('123.45'), curs.cast(1700, '123.45'))
 
         from datetime import date
-        self.assertEqual(date(2011, 1, 2), curs.cast(1082, '2011-01-02'))
+        self.assertEqual(date(2011,1,2), curs.cast(1082, '2011-01-02'))
         self.assertEqual("who am i?", curs.cast(705, 'who am i?'))  # unknown
 
     def test_cast_specificity(self):
@@ -166,8 +160,7 @@ class CursorTests(ConnectingTestCase):
         curs = self.conn.cursor()
         w = ref(curs)
         del curs
-        import gc
-        gc.collect()
+        import gc; gc.collect()
         self.assert_(w() is None)
 
     def test_null_name(self):
@@ -177,7 +170,7 @@ class CursorTests(ConnectingTestCase):
     def test_invalid_name(self):
         curs = self.conn.cursor()
         curs.execute("create temp table invname (data int);")
-        for i in (10, 20, 30):
+        for i in (10,20,30):
             curs.execute("insert into invname values (%s)", (i,))
         curs.close()
 
@@ -202,16 +195,16 @@ class CursorTests(ConnectingTestCase):
 
         self._create_withhold_table()
         curs = self.conn.cursor("W")
-        self.assertEqual(curs.withhold, False)
+        self.assertEqual(curs.withhold, False);
         curs.withhold = True
-        self.assertEqual(curs.withhold, True)
+        self.assertEqual(curs.withhold, True);
         curs.execute("select data from withhold order by data")
         self.conn.commit()
         self.assertEqual(curs.fetchall(), [(10,), (20,), (30,)])
         curs.close()
 
         curs = self.conn.cursor("W", withhold=True)
-        self.assertEqual(curs.withhold, True)
+        self.assertEqual(curs.withhold, True);
         curs.execute("select data from withhold order by data")
         self.conn.commit()
         self.assertEqual(curs.fetchall(), [(10,), (20,), (30,)])
@@ -273,18 +266,18 @@ class CursorTests(ConnectingTestCase):
         curs = self.conn.cursor()
         curs.execute("create table scrollable (data int)")
         curs.executemany("insert into scrollable values (%s)",
-            [(i,) for i in range(100)])
+            [ (i,) for i in range(100) ])
         curs.close()
 
         for t in range(2):
             if not t:
                 curs = self.conn.cursor("S")
-                self.assertEqual(curs.scrollable, None)
+                self.assertEqual(curs.scrollable, None);
                 curs.scrollable = True
             else:
                 curs = self.conn.cursor("S", scrollable=True)
 
-            self.assertEqual(curs.scrollable, True)
+            self.assertEqual(curs.scrollable, True);
             curs.itersize = 10
 
             # complex enough to make postgres cursors declare without
@@ -312,7 +305,7 @@ class CursorTests(ConnectingTestCase):
         curs = self.conn.cursor()
         curs.execute("create table scrollable (data int)")
         curs.executemany("insert into scrollable values (%s)",
-            [(i,) for i in range(100)])
+            [ (i,) for i in range(100) ])
         curs.close()
 
         curs = self.conn.cursor("S")    # default scrollability
@@ -331,7 +324,6 @@ class CursorTests(ConnectingTestCase):
         curs.scroll(2)
         self.assertRaises(psycopg2.OperationalError, curs.scroll, -1)
 
-    @slow
     @skip_before_postgres(8, 2)
     def test_iter_named_cursor_efficient(self):
         curs = self.conn.cursor('tmp')
@@ -350,18 +342,18 @@ class CursorTests(ConnectingTestCase):
     def test_iter_named_cursor_default_itersize(self):
         curs = self.conn.cursor('tmp')
         curs.execute('select generate_series(1,50)')
-        rv = [(r[0], curs.rownumber) for r in curs]
+        rv = [ (r[0], curs.rownumber) for r in curs ]
         # everything swallowed in one gulp
-        self.assertEqual(rv, [(i, i) for i in range(1, 51)])
+        self.assertEqual(rv, [(i,i) for i in range(1,51)])
 
     @skip_before_postgres(8, 0)
     def test_iter_named_cursor_itersize(self):
         curs = self.conn.cursor('tmp')
         curs.itersize = 30
         curs.execute('select generate_series(1,50)')
-        rv = [(r[0], curs.rownumber) for r in curs]
+        rv = [ (r[0], curs.rownumber) for r in curs ]
         # everything swallowed in two gulps
-        self.assertEqual(rv, [(i, ((i - 1) % 30) + 1) for i in range(1, 51)])
+        self.assertEqual(rv, [(i,((i - 1) % 30) + 1) for i in range(1,51)])
 
     @skip_before_postgres(8, 0)
     def test_iter_named_cursor_rownumber(self):
@@ -499,47 +491,48 @@ class CursorTests(ConnectingTestCase):
         cur = self.conn.cursor()
         self.assertRaises(TypeError, cur.callproc, 'lower', 42)
 
-    # It would be inappropriate to test callproc's named parameters in the
-    # DBAPI2.0 test section because they are a psycopg2 extension.
-    @skip_before_postgres(9, 0)
-    def test_callproc_dict(self):
-        # This parameter name tests for injection and quote escaping
-        paramname = '''
-            Robert'); drop table "students" --
-        '''.strip()
-        escaped_paramname = '"%s"' % paramname.replace('"', '""')
-        procname = 'pg_temp.randall'
+    def test_external_close_sync(self):
+        # If a "victim" connection is closed by a "control" connection
+        # behind psycopg2's back, psycopg2 always handles it correctly:
+        # raise OperationalError, set conn.closed to 2. This reproduces
+        # issue #443, a race between control_conn closing victim_conn and
+        # psycopg2 noticing.
+        control_conn = self.conn
+        connect_func = self.connect
+        wait_func = lambda conn: None
+        self._test_external_close(control_conn, connect_func, wait_func)
 
-        cur = self.conn.cursor()
+    def test_external_close_async(self):
+        # Issue #443 is in the async code too. Since the fix is duplicated,
+        # so is the test.
+        control_conn = self.conn
+        connect_func = lambda: self.connect(async=True)
+        wait_func = psycopg2.extras.wait_select
+        self._test_external_close(control_conn, connect_func, wait_func)
 
-        # Set up the temporary function
-        cur.execute('''
-            CREATE FUNCTION %s(%s INT)
-            RETURNS INT AS
-                'SELECT $1 * $1'
-            LANGUAGE SQL
-        ''' % (procname, escaped_paramname));
+    def _test_external_close(self, control_conn, connect_func, wait_func):
+        # The short sleep before using victim_conn the second time makes it
+        # much more likely to lose the race and see the bug. Repeating the
+        # test several times makes it even more likely.
+        for i in range(10):
+            victim_conn = connect_func()
+            wait_func(victim_conn)
 
-        # Make sure callproc works right
-        cur.callproc(procname, { paramname: 2 })
-        self.assertEquals(cur.fetchone()[0], 4)
+            with victim_conn.cursor() as cur:
+                cur.execute('select pg_backend_pid()')
+                wait_func(victim_conn)
+                pid1 = cur.fetchall()[0][0]
 
-        # Make sure callproc fails right
-        failing_cases = [
-            ({ paramname: 2, 'foo': 'bar' }, psycopg2.ProgrammingError),
-            ({ paramname: '2' },             psycopg2.ProgrammingError),
-            ({ paramname: 'two' },           psycopg2.ProgrammingError),
-            ({ u'bj\xc3rn': 2 },             psycopg2.ProgrammingError),
-            ({ 3: 2 },                       TypeError),
-            ({ self: 2 },                    TypeError),
-        ]
-        for parameter_sequence, exception in failing_cases:
-            self.assertRaises(exception, cur.callproc, procname, parameter_sequence)
-            self.conn.rollback()
+            with control_conn.cursor() as cur:
+                cur.execute('select pg_terminate_backend(%s)', (pid1,))
 
-    def test_callproc_badparam(self):
-        cur = self.conn.cursor()
-        self.assertRaises(TypeError, cur.callproc, 'lower', 42)
+            time.sleep(0.001)
+            with self.assertRaises(psycopg2.DatabaseError):
+                with victim_conn.cursor() as cur:
+                    cur.execute('select 1')
+                    wait_func(victim_conn)
+
+            self.assertEqual(victim_conn.closed, 2)
 
 
 def test_suite():
